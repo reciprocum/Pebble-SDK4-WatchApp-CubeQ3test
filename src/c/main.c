@@ -3,7 +3,7 @@
    File   : main.c
    Author : Afonso Santos, Portugal
 
-   Last revision: 12h54 August 30 2016
+   Last revision: 12h55 September 07 2016  GMT
 */
 
 #include <pebble.h>
@@ -48,10 +48,12 @@ Sampler   *sampler_accelZ = NULL ;            // To be allocated at world_initia
 
 
 // Camera related
-#define  CAM3D_DISTANCEFROMORIGIN    (Q_make(2.2f))
+#define  CAM3D_DISTANCEFROMORIGIN    2.2f
 
 static CamQ3             s_cam ;
-static Q                 s_cam_zoom           = PBL_IF_RECT_ELSE(Q_make(1.25f), Q_make(1.15f)) ;
+static Q                 s_cam_zoom           = PBL_IF_RECT_ELSE(Q_from_float(1.25f), Q_from_float(1.15f)) ;
+static int32_t           s_cam_rotZangle      = 0 ;
+static int32_t           s_cam_rotZstepAngle ;
 static MeshTransparency  s_transparencyMode   = MESH_TRANSPARENCY_SOLID ;   // To be loaded/initialized from persistent storage.
 
 
@@ -110,16 +112,25 @@ void  world_finalize( ) ;
 
 void
 cam_config
-( Q3 *viewPoint )
+( const Q3      *pViewPoint
+, const int32_t  pRotZangle
+)
 {
+  Q3 scaledVP ;
+
+  Q3_scaTo( &scaledVP
+          , Q_from_float(CAM3D_DISTANCEFROMORIGIN)
+          , (pViewPoint->x != Q_0  ||  pViewPoint->y != Q_0)          // Viewpoint not on Z axis ?
+            ? pViewPoint                                              // Use original view point.
+            : &(Q3){ .x = Q_1>>4, .y = Q_1>>4, .z = pViewPoint->z }
+          ) ;
+
+
+  Q3 rotatedVP ;
+  Q3_rotZ( &rotatedVP, &scaledVP, pRotZangle ) ;
+
   // setup 3D camera
-  CamQ3_lookAtOriginUpwards( &s_cam
-                           , Q3_scale( CAM3D_DISTANCEFROMORIGIN    // View point.
-                                     , viewPoint
-                                     )
-                           , s_cam_zoom                            // Zoom
-                           , CAM_PROJECTION_PERSPECTIVE
-                           ) ;
+  CamQ3_lookAtOriginUpwards( &s_cam, &rotatedVP, s_cam_zoom, CAM_PROJECTION_PERSPECTIVE ) ;
 }
 
 
@@ -150,6 +161,10 @@ world_initialize
   sampler_initialize( ) ;
   s_cube = CubeQ3_new( ) ;
   CubeQ3_config( s_cube, Q_1, NULL ) ;
+
+  // Initialize cam rotation constants.
+  s_cam_rotZangle     = 0 ;
+  s_cam_rotZstepAngle = TRIG_MAX_ANGLE / 512 ;
 }
 
 
@@ -172,14 +187,14 @@ world_update
   }
   else
   {
-#ifdef QEMU
-    if (ad.x == 0  &&  ad.y == 0  &&  ad.z == -1000)   // Under QEMU with SENSORS off this is the default output.
+#ifdef EMU
+    if (ad.x == 0  &&  ad.y == 0  &&  ad.z == -1000)   // Under EMU with SENSORS off this is the default output.
     {
       Sampler_push( sampler_accelX,  -81 ) ;
       Sampler_push( sampler_accelY, -816 ) ;
       Sampler_push( sampler_accelZ, -571 ) ;
     }
-    else                                               // If running under QEMU the SENSOR feed must be ON.
+    else                                               // If running under EMU the SENSOR feed must be ON.
     {
       Sampler_push( sampler_accelX, ad.x ) ;
       Sampler_push( sampler_accelY, ad.y ) ;
@@ -197,11 +212,13 @@ world_update
     const float avgZ =-(float)(kAvg * sampler_accelZ->samplesAcum ) ;
 
     static Q3 viewPoint ;
-    viewPoint.x = Q_make( avgX ) ;
-    viewPoint.y = Q_make( avgY ) ;
-    viewPoint.z = Q_make( avgZ ) ;
-      
-    cam_config( &viewPoint ) ;
+    viewPoint.x = Q_from_float( avgX ) ;
+    viewPoint.y = Q_from_float( avgY ) ;
+    viewPoint.z = Q_from_float( avgZ ) ;
+
+    s_cam_rotZangle += s_cam_rotZstepAngle ;
+    s_cam_rotZangle &= 0xFFFF ;        // Keep angle normalized. (% 2PI)
+    cam_config( &viewPoint, s_cam_rotZangle ) ;
   }
 
   // this will queue a defered call to the world_draw( ) method.
@@ -219,8 +236,8 @@ world_draw
 , GContext *gCtx
 )
 {
-  // Disable antialiasing if running under QEMU (crashes after a few frames otherwise).
-#ifdef QEMU
+#ifdef EMU
+  // Disable antialiasing if running under EMU (crashes after a few frames otherwise).
   graphics_context_set_antialiased( gCtx, false ) ;
 #endif
 

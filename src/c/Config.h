@@ -3,7 +3,7 @@
    File   : Config.h
    Author : Afonso Santos, Portugal
 
-   Last revision: 12h54 August 30 2016
+   Last revision: 12h55 September 07 2016  GMT
 */
 
 #pragma once
@@ -12,7 +12,7 @@
 //#define LOG
 
 // Commenting the next line will enable antialised and thick strokes.
-#define QEMU
+//#define EMU
 
 // Uncoment next line to "fake" running on APLITE/DIORITE B&W platforms.
 //#undef PBL_COLOR
